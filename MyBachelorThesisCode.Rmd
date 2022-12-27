@@ -1,0 +1,304 @@
+---
+title: "Bachelor Thesis"
+author: "Emma Rose Hahn"
+date: "2022-10-26"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+## installing all we could ever need
+
+```{r warning = FALSE, message= FALSE}
+#install.packages("devtools")
+#require("devtools")
+#install_version("wordbankr", version = "0.3.1", repos = "http://cran.us.r-project.org")
+library(plyr)
+library(tidyverse)
+library(wordbankr)
+library(kableExtra)
+library(magick)
+library(webshot)
+library(caret)
+library(e1071)
+library(stringr)
+library(ggplot2)
+library(ggsci)
+library(cowplot)
+library(lmerTest)
+library(sjmisc)
+library(wordcloud2)
+library(RColorBrewer)
+library(reshape)
+library(htmlwidgets)
+library(effects)
+library(effectsize)
+library(forcats)
+library(blme)
+library(optimx)
+
+#Make sure that the random number generator is reset for reproducibility
+RNGkind(sample.kind="default")
+#Get Session info for reproducibility
+sessionInfo()
+```
+
+#loading in the languages, loading all in now, and will filter just to english later
+
+```{r}
+
+load("~/Bachelors/CDI_WS_raw_221111.Rdata")
+data_mode <- "remote"
+
+# Make a list with all the languages in the Wordbank that also has a WS (Words and sentences) form
+#languages <- get_administration_data(mode = data_mode) %>%
+#select(language, form) %>% dplyr::filter(form == 'WS') %>% select(language) %>% unique(.)
+#languages <- split(languages, as.factor(languages$language))
+
+# A function for loading the raw data
+#get_raw_data <- function(inst_items) {
+ # lang = unique(inst_items)
+  #get_instrument_data(
+   # language = lang$language,
+    #form = 'WS',
+    #iteminfo = T,
+    #administrations = T,
+    #mode = data_mode
+  #) %>%
+   # mutate(produces = !is.na(value) & value == "produces") %>%
+    #mutate(num_item_id = as.numeric(substr(item_id, 6, nchar(item_id))),
+        #   definition = tolower(definition))
+#}
+
+# Use the map function to load all data from all languages into a list
+#CDI_WS_raw <- map(languages, get_raw_data)
+
+#filtering it just to english for now
+E_WS_raw <- c(CDI_WS_raw["English (American)"], CDI_WS_raw["English (Australian)"])
+
+
+```
+
+#MY RAW DATA FRAME
+
+```{r}
+df_making <- function(E_data) {
+  #this thing that mikkel did 
+  
+  #Sort data by participants, and item
+  E_data <- E_data[order(E_data$data_id, E_data$num_item_id), ]
+  #Get number of participants and unique items (they vary across languages)
+  N_par <- length(unique(E_data$data_id))
+  
+  #picking which parts to use 
+  id = E_data$data_id
+  age = E_data$age
+  sex = E_data$sex
+  words = E_data$definition
+  category = E_data$category
+  language = E_data$language
+  #to see if they produced it or not
+  produces = E_data$produces
+  #Putting into dataframe 
+  E <- data.frame(id, sex, age, words, category, language, produces)
+  
+    list(
+    id = id,
+    sex = sex,
+    age = age,
+    language = language,
+    words = words,
+    category = category,
+    produces = produces,
+    df = E
+  )
+}
+
+set.seed(1234)
+E_WS_DF_RAW <- llply(E_WS_raw, df_making)
+```
+
+#TIME TO SORT IT OUT
+
+```{r}
+cleaning_it_out <- function(E_data) {
+  df <- na.omit(E_data$df)
+  df <- filter(df, category == "pronouns")
+  df <- subset(df, sex != "Other") #filtering out those that say Other, yet it comes up later
+
+
+  
+  #identifying the 1st, 2nd and 3rd person pronouns for the more in depth
+  
+  df$category[df$category == "pronouns" & df$words == "I" |df$words == "i" | df$words == "me"| df$words == "my"| df$words == "mine"| df$words == "myself"| df$words == "we"| df$words == "us"| df$words == "our"| df$words == "ourselves"| df$words == "ours"] <- 1 #for first person
+  df$category[df$category == "pronouns" & df$words == "you" | df$words == "your" | df$words == "yours"| df$words == "yourself"] <- 2 #for second person
+  df$category[df$category == "pronouns" & df$words == "he" | df$words == "him"| df$words == "his"| df$words == "himself"| df$words == "she"| df$words == "her"| df$words == "hers"| df$words == "herself"| df$words == "it"| df$words == "its"| df$words == "itself"| df$words == "one"| df$words == "one's"| df$words == "oneself"| df$words == "they"| df$words == "them"| df$words == "their"| df$words == "theirs"| df$words == "themselves"] <- 3 #for third person
+  
+  
+# removing the other pronouns that are not POV pronouns
+  
+    df <- subset(df, category != "pronouns")
+    df <- df %>% 
+  mutate(type = category) #making the column for plural vs singular
+    
+  df$type[df$type == "1" & df$words == "I" |df$words == "i" | df$words == "me"| df$words == "my"| df$words == "mine"| df$words == "myself"] <- "Singular" #for first person singular
+  
+  df$type[df$type == "1" & df$words == "we"| df$words == "us"| df$words == "our"| df$words == "ourselves"| df$words == "ours"] <- "Plural" #for first person plural
+  
+  df$type[df$type == "2" & df$words == "you" | df$words == "your" | df$words == "yours"| df$words == "yourself"] <- "1Null" #for second person null you can be singular or plural, so i will just mark it as null or ignore, as i am only interested in 1st and 3rd person anyway 
+  
+  df$type[df$type == "3" & df$words == "he" | df$words == "him"| df$words == "his"| df$words == "himself"| df$words == "she"| df$words == "her"| df$words == "hers"| df$words == "herself"| df$words == "it"| df$words == "its"| df$words == "itself"| df$words == "one"| df$words == "one's"| df$words == "oneself"] <- "Singular" #for third person singular
+  
+ df$type[df$type == "3" & df$words == "they"| df$words == "them"| df$words == "their"| df$words == "theirs"| df$words == "themselves"] <- "Plural" #for third person
+
+    
+        clean_df <- data.frame(df$id, df$sex, df$age, df$language, as.factor(df$words), df$category, df$type, df$produces)
+    colnames(clean_df) <- c('ID', 'Sex', 'Age', 'Language', 'Words', 'Pronouns','Type', 'Produces')
+
+  list(
+    ID = E_data$id,
+    sex = E_data$sex,
+    age = E_data$age,
+    language = E_data$language,
+    words = E_data$words,
+    pronoun = E_data$category,
+    produces = E_data$produces,
+    df = clean_df
+  )
+}
+
+E_WS_DF <- llply(E_WS_DF_RAW, cleaning_it_out)
+
+#it is at this point looking at the data, (and some further investigation) in the Australian English data set, they do not have pronouns as a category/in the words, so in English we can only use American English
+
+Eng_DF <- as.data.frame(E_WS_DF[["English (American)"]][["df"]])
+Eng_DF$Pronouns <- as.factor(Eng_DF$Pronouns)
+Eng_DF$ID <- as.factor(Eng_DF$ID)
+Eng_DF$Type <- as.factor(Eng_DF$Type)
+Eng_DF$Sex <- droplevels(Eng_DF$Sex)
+
+is.factor(Eng_DF$Sex) 
+
+
+Eng_DF <- downSample(Eng_DF, as.factor(Eng_DF$Sex)) %>% select(-Class)
+
+# counting the number of times pronouns were used so i can have a reference point
+numbers <- Eng_DF %>% 
+  group_by(Sex) %>% 
+  count(Pronouns)
+
+
+
+num <- as.data.frame(numbers)
+
+num #others doesn't come up here so it should be filtered out
+
+#making another dataframe to remove 2nd person pronouns from 
+
+Eng_DF_2 <- Eng_DF
+
+Eng_DF_2 <- subset(Eng_DF, Pronouns != "2" | Type != "1Null")
+
+third_POV <- Eng_DF_2[Eng_DF_2$Pronouns != "1",]
+
+third_POV <- third_POV[third_POV$Type != "Plural",]
+# I MAYBE DID IT ITS SORTED AND CLEANED ISH PERFECTION
+```
+
+#the new model
+```{r}
+set.seed(1111)
+contrasts(Eng_DF$Sex)
+contrasts(Eng_DF$Produces)
+
+
+Eng_DF$Pronouns <- relevel(Eng_DF$Pronouns, ref = "1")
+
+#for looking at just pronouns and sex interaction with 1st person as the baseline
+megamodel <- glmer(formula = Produces ~ Pronouns*Sex+(1|ID), family = binomial(link = "logit"),control=glmerControl(optimizer="bobyqa",
+                            optCtrl=list(maxfun=2e5)), data = Eng_DF)
+
+summary(megamodel) # in this, 3rd POV pronouns are used significantly less by males (0.00475)
+
+Eng_DF$Pronouns <- relevel(Eng_DF$Pronouns, ref = "2") #changing so 2nd is the baseline
+
+#doing the same as above with 2nd as baseline
+
+megamodel2 <- glmer(formula = Produces ~ Pronouns*Sex+(1|ID), family = binomial(link = "logit"),control=glmerControl(optimizer="bobyqa",
+                            optCtrl=list(maxfun=2e5)), data = Eng_DF)
+
+summary(megamodel2) # okay when its ordered this way male using 3rd POV pronouns less it is still significant (0.0419)
+
+
+#looking at type of pronoun interaction with sex (2nd person removed)
+
+megamodel3 <- glmer(formula = Produces ~ Type*Sex+(1|ID), family = binomial(link = "logit"),control=glmerControl(optimizer="bobyqa",
+                            optCtrl=list(maxfun=2e5)), data = Eng_DF_2)
+
+summary(megamodel3)
+
+modelforthird <- glmer(formula = Produces ~ Words*Sex +(1|ID), family = binomial(link = "logit"),control=glmerControl(optimizer="bobyqa",
+                            optCtrl=list(maxfun=2e5)), data = third_POV)
+
+summary(modelforthird)
+
+megamindmodel <- glmer(formula = Produces ~ Pronouns*Sex*Type +(1|ID), family = binomial(link = "logit"),control=glmerControl(optimizer="bobyqa",
+                            optCtrl=list(maxfun=2e5)), data = Eng_DF_2)
+
+
+summary(megamindmodel)
+
+
+
+
+```
+# do we use any of these??
+```{r}
+# not sure if it makes sense to use the models from here on out if we use the ones mentioned above already
+
+#have to adjust code wherein type is associated with pronoun, as it makes these results when u run them now esp say nothing, but they also dn't really make much sense now anyway
+
+
+
+
+```
+
+
+
+#effect_size
+```{r}
+
+mm2 <- effectsize::standardize_parameters(megamodel2, exp = TRUE)
+# the effect size is very small 
+
+mm <- effectsize::standardize_parameters(megamodel, exp = TRUE)
+# effect size is also very small only male pronouns 2 is over 1, 1.01
+
+mm3 <- effectsize::standardize_parameters(megamodel3, exp = TRUE)
+
+mmm <- effectsize::standardize_parameters(megamindmodel, exp = TRUE)
+
+interpret_oddsratio(1.61
+, rules = "cohen1988")
+
+pov3 <- effectsize::standardize_parameters(modelforthird, exp = TRUE)
+
+mm3
+
+mmm
+
+pov3
+
+ 
+```
+
+
+
+
+
+
+
+
+
+
+
