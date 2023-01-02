@@ -36,6 +36,10 @@ library(effectsize)
 library(forcats)
 library(blme)
 library(optimx)
+library(scales)
+library(ggthemes)
+
+install.packages("scales")
 
 #Make sure that the random number generator is reset for reproducibility
 RNGkind(sample.kind="default")
@@ -214,11 +218,17 @@ contrasts(Eng_DF$Produces)
 
 Eng_DF$Pronouns <- relevel(Eng_DF$Pronouns, ref = "1")
 
+# Create a ggplot object using the data in the dataframe
+
+
+
 #for looking at just pronouns and sex interaction with 1st person as the baseline
 megamodel <- glmer(formula = Produces ~ Pronouns*Sex+(1|ID), family = binomial(link = "logit"),control=glmerControl(optimizer="bobyqa",
                             optCtrl=list(maxfun=2e5)), data = Eng_DF)
 
 summary(megamodel) # in this, 3rd POV pronouns are used significantly less by males (0.00475)
+
+
 
 Eng_DF$Pronouns <- relevel(Eng_DF$Pronouns, ref = "2") #changing so 2nd is the baseline
 
@@ -232,10 +242,21 @@ summary(megamodel2) # okay when its ordered this way male using 3rd POV pronouns
 
 #looking at type of pronoun interaction with sex (2nd person removed)
 
-megamodel3 <- glmer(formula = Produces ~ Type*Sex+(1|ID), family = binomial(link = "logit"),control=glmerControl(optimizer="bobyqa",
+
+
+megamodel3 <- glmer(formula = Produces ~ Pronouns*Type*Sex+(1|ID), family = binomial(link = "logit"),control=glmerControl(optimizer="bobyqa",
                             optCtrl=list(maxfun=2e5)), data = Eng_DF_2)
 
 summary(megamodel3)
+
+Eng_DF_2$Pronouns <- relevel(Eng_DF_2$Pronouns, ref = "3")
+Eng_DF_2$Type <- relevel(Eng_DF_2$Type, ref = "Plural")
+Eng_DF_2$Sex <- relevel(Eng_DF_2$Sex, ref = "Male")
+
+megamodel4 <- glmer(formula = Produces ~ Pronouns*Type*Sex+(1|ID), family = binomial(link = "logit"),control=glmerControl(optimizer="bobyqa",
+                            optCtrl=list(maxfun=2e5)), data = Eng_DF_2)
+
+summary(megamodel4)
 
 modelforthird <- glmer(formula = Produces ~ Words*Sex +(1|ID), family = binomial(link = "logit"),control=glmerControl(optimizer="bobyqa",
                             optCtrl=list(maxfun=2e5)), data = third_POV)
@@ -248,7 +269,14 @@ megamindmodel <- glmer(formula = Produces ~ Pronouns*Sex*Type +(1|ID), family = 
 
 summary(megamindmodel)
 
+anova(megamodel)
 
+ggplot(data = Eng_DF, aes(x = Sex, fill = Produces)) +
+  facet_wrap(~Pronouns) + 
+  scale_fill_manual(values=c("#90CD97", "#F6AAC9")) +
+  geom_bar(position = "fill") +
+  theme_tufte() +
+  labs(title = "Proportion of Produced by Sex, faceted by Pronoun Type", x = "Sex", y = "Proportion")
 
 
 ```
@@ -276,9 +304,11 @@ mm <- effectsize::standardize_parameters(megamodel, exp = TRUE)
 
 mm3 <- effectsize::standardize_parameters(megamodel3, exp = TRUE)
 
+mm4 <- effectsize::standardize_parameters(megamodel4, exp = TRUE)
+
 mmm <- effectsize::standardize_parameters(megamindmodel, exp = TRUE)
 
-interpret_oddsratio(1.61
+interpret_oddsratio(1.21
 , rules = "cohen1988")
 
 pov3 <- effectsize::standardize_parameters(modelforthird, exp = TRUE)
@@ -288,6 +318,10 @@ mm3
 mmm
 
 pov3
+
+mm4
+
+mm
 
  
 ```
